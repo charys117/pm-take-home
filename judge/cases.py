@@ -32,6 +32,8 @@ METAMORPHIC_GRID = [
     (4, 4, 6, 16, True),
 ]
 
+SCALE_S = (1024, 2048)  # sample S_q = S_kv in this range
+
 
 def generate_cases(rng):
     cases = []
@@ -48,13 +50,13 @@ def generate_cases(rng):
     add("forward_fp32", FORWARD_GRID, "float32")
     add("forward_bf16", FORWARD_GRID[:4], "bfloat16")
     add("forward_meta", METAMORPHIC_GRID, "float32", meta=True)
-    # same shape as memcheck probe — skip-work on large S fails forward too
-    cases.append({
-        "group": "forward_scale", "h_q": 8, "h_kv": 2, "s_q": 2048, "s_kv": 2048,
-        "causal": True, "dtype": "bfloat16", "b": 2, "d": 64, "scale": 1.0,
-        "seed": rng.randrange(2**31), "grads": False, "meta": False,
-    })
-    # gradients compared in fp32 only
+    for _ in range(2):
+        s = rng.randint(*SCALE_S)
+        cases.append({
+            "group": "scale", "h_q": 8, "h_kv": 2, "s_q": s, "s_kv": s,
+            "causal": True, "dtype": "bfloat16", "b": 2, "d": 64, "scale": 1.0,
+            "seed": rng.randrange(2**31), "grads": False, "meta": False,
+        })
     add("backward_fp32", BACKWARD_GRID, "float32", grads=True)
     return cases
 

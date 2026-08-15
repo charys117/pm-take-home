@@ -1,24 +1,21 @@
-"""CUDA peak-memory probe: reject vanilla slow-path attention.
+"""CUDA peak/time probe for the scale group.
 
 nvidia-smi is read in this process; the candidate runs in a child so
-import-time patches cannot fake the reading. The last probe output is
-checked against gqa_attn_fused_oracle — memory without a matching
-output does not pass the gate.
+import-time patches cannot fake the reading. Over the fused baseline
+by RATIO (memory or wall time) → scale cases fail. Correctness of
+those cases is scored by compare, not here.
 """
 
 import json
 import subprocess
 import sys
-import tempfile
-from pathlib import Path
+import time
 
 import torch
 
-SHAPE = (2, 2048, 8, 2, 64)  # B, S, Hq, Hkv, D
-SEED = 7
+SHAPE = (2, 2048, 8, 2, 64)  # B, S, Hq, Hkv, D — S overridden by argv
 RATIO = 4.0
 REPEATS = 16
-TOL = {"rtol": 3e-2, "atol": 3e-2}  # compare.py bfloat16
 
 
 def _smi_mib():
@@ -28,15 +25,7 @@ def _smi_mib():
     return int(out.strip())
 
 
-def _probe_tensors(device="cuda"):
-    g = torch.Generator().manual_seed(SEED)
-    b, s, h_q, h_kv, d = SHAPE
-    def t(h):
-        return torch.randn(b, s, h, d, generator=g).to(torch.bfloat16).to(device)
-    return t(h_q), t(h_kv), t(h_kv)
-
-
-def _measure_peak(worker_args):
+def _measure(worker_args):
     cmd = [sys.executable, "-u", __file__, "--worker", *worker_args]
     kw = {}
     if worker_args[0] == "candidate":
@@ -45,72 +34,62 @@ def _measure_peak(worker_args):
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, **kw)
     if not proc.stdout.readline():
         proc.wait()
-        return None
+        return None, None
     base = _smi_mib()
     try:
         proc.stdin.write("\n")
         proc.stdin.flush()
     except BrokenPipeError:
         proc.wait()
-        return None
+        return None, None
     peak = base
+    t0 = time.perf_counter()
     while proc.poll() is None:
         peak = max(peak, _smi_mib())
+    elapsed = time.perf_counter() - t0
     if proc.returncode != 0:
-        return None
-    return max(0, peak - base) * 1024 * 1024
+        return None, None
+    return max(0, peak - base) * 1024 * 1024, elapsed
 
 
-def _check_out(path):
-    try:
-        got = torch.load(path, weights_only=True)
-    except Exception:
-        return False
-    from oracle import gqa_attn_fused_oracle
-    q, k, v = _probe_tensors()
-    ref = gqa_attn_fused_oracle(q, k, v, True)
-    if not isinstance(got, torch.Tensor) or got.shape != ref.shape or got.dtype != ref.dtype:
-        return False
-    try:
-        torch.testing.assert_close(got.float().cpu(), ref.float().cpu(), **TOL)
-    except AssertionError:
-        return False
-    return True
-
-
-def worker(kind, workspace=None, out_path=None):
+def worker(kind, workspace=None, s=None):
     if kind == "candidate":
         sys.path.insert(0, workspace)
         from gqa_attn.adapter import gqa_attn_fused as fn
+        s = int(s)
     else:
         from oracle import gqa_attn_fused_oracle
         fn = gqa_attn_fused_oracle
-    q, k, v = _probe_tensors()
+        s = int(workspace) if workspace is not None else SHAPE[1]
+        workspace = None
+    b, _, h_q, h_kv, d = SHAPE
+    q = torch.randn(b, s, h_q, d, device="cuda", dtype=torch.bfloat16)
+    k = torch.randn(b, s, h_kv, d, device="cuda", dtype=torch.bfloat16)
+    v = torch.randn(b, s, h_kv, d, device="cuda", dtype=torch.bfloat16)
     print("base", flush=True)
     sys.stdin.readline()
-    out = None
     for _ in range(REPEATS):
-        out = fn(q, k, v, True)
+        fn(q, k, v, True)
     torch.cuda.synchronize()
-    if out_path:
-        torch.save(out.detach().cpu(), out_path)
 
 
-def main(workspace):
-    out_p = Path(tempfile.mkdtemp()) / "probe.pt"
+def main(workspace, s=None):
+    s = str(s or SHAPE[1])
     try:
-        fused = _measure_peak(["fused"])
-        cand = _measure_peak(["candidate", workspace, str(out_p)])
+        fused_m, fused_t = _measure(["fused", s])
+        cand_m, cand_t = _measure(["candidate", workspace, s])
     except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
         print(json.dumps({"ok": False}))
         return
-    ok_mem = fused is not None and cand is not None and cand <= fused * RATIO
-    ok_num = _check_out(out_p)
+    if None in (fused_m, fused_t, cand_m, cand_t) or fused_m == 0 or fused_t == 0:
+        print(json.dumps({"ok": False}))
+        return
     print(json.dumps({
-        "ok": bool(ok_mem and ok_num),
-        "candidate_bytes": cand,
-        "fused_bytes": fused,
-        "numeric": ok_num,
+        "ok": cand_m <= fused_m * RATIO and cand_t <= fused_t * RATIO,
+        "candidate_bytes": cand_m,
+        "fused_bytes": fused_m,
+        "candidate_s": cand_t,
+        "fused_s": fused_t,
     }))
 
 
@@ -118,4 +97,4 @@ if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--worker":
         worker(*sys.argv[2:])
     else:
-        main(sys.argv[1])
+        main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)

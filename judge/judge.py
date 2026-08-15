@@ -23,9 +23,10 @@ ALLOWLIST = {"gqa_attn/adapter.py"}
 RUNNER = Path(__file__).resolve().parent / "runner.py"
 COMPARE = Path(__file__).resolve().parent / "compare.py"
 MEMCHECK = Path(__file__).resolve().parent / "memcheck.py"
-WEIGHTS = {"forward": 0.5, "backward": 0.3, "regression": 0.2}
-FWD_GROUPS = {"forward_fp32", "forward_bf16", "forward_meta", "forward_scale"}
+WEIGHTS = {"forward": 0.35, "backward": 0.25, "scale": 0.25, "regression": 0.15}
+FWD_GROUPS = {"forward_fp32", "forward_bf16", "forward_meta"}
 BWD_GROUPS = {"backward_fp32"}
+SCALE_GROUPS = {"scale"}
 
 
 def _git(workspace, *args):
@@ -43,7 +44,7 @@ def judge_instance(instance_dir, judge_seed=None, device=None):
     instance = Path(instance_dir)
     seed = random.randrange(2**31) if judge_seed is None else judge_seed
     meta = json.loads((instance / "meta.json").read_text())
-    result = {"gates": {"integrity": True, "finite": True, "fused": True}, "subscores": {}, "reward": 0.0}
+    result = {"gates": {"integrity": True, "finite": True}, "subscores": {}, "reward": 0.0}
 
     def failed(gate):
         result["gates"][gate] = False
@@ -84,16 +85,21 @@ def judge_instance(instance_dir, judge_seed=None, device=None):
         if any(r["nonfinite"] for r in rows):
             result["gates"]["finite"] = False
             
-        # fused-memory gate (CUDA only): vanilla S*S scores blow the peak
+        # scale group: memory/time over fused*RATIO fails those cases (CUDA only)
         if resolve().type == "cuda":
             try:
+                s = max(c["s_q"] for c in cases if c["group"] == "scale")
                 mem = subprocess.run(
-                    [sys.executable, str(MEMCHECK), str(clean)],
+                    [sys.executable, str(MEMCHECK), str(clean), str(s)],
                     capture_output=True, text=True, timeout=60)
                 if not json.loads(mem.stdout)["ok"]:
-                    result["gates"]["fused"] = False
-            except (json.JSONDecodeError, KeyError, subprocess.TimeoutExpired):
-                result["gates"]["fused"] = False
+                    for r in rows:
+                        if r["group"] == "scale":
+                            r["ok"] = False
+            except (json.JSONDecodeError, KeyError, ValueError, subprocess.TimeoutExpired):
+                for r in rows:
+                    if r["group"] == "scale":
+                        r["ok"] = False
 
         # public suite
         pt = subprocess.run(
@@ -107,6 +113,7 @@ def judge_instance(instance_dir, judge_seed=None, device=None):
     sub = result["subscores"]
     sub["forward"] = _frac(rows, lambda r: r["group"] in FWD_GROUPS)
     sub["backward"] = _frac(rows, lambda r: r["group"] in BWD_GROUPS)
+    sub["scale"] = _frac(rows, lambda r: r["group"] in SCALE_GROUPS)
     sub["regression"] = passed / total if total else 0.0
     gate = all(result["gates"].values())
     result["reward"] = round(gate * sum(WEIGHTS[k] * sub[k] for k in WEIGHTS), 4)

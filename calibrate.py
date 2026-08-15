@@ -37,6 +37,15 @@ SLOW_BYPASS = (
     "    return gqa_attn_ref(q, k, v, causal)\n"
 )
 
+# skip the large-S scale probe, use reference on small shapes
+PROBE_DODGER = (
+    "from .reference import gqa_attn_ref\n"
+    "def gqa_attn_fused(q, k, v, causal):\n"
+    "    if q.shape[1] >= 1024:\n"
+    "        return q\n"
+    "    return gqa_attn_ref(q, k, v, causal)\n"
+)
+
 # forge worker results
 FORGE = (
     "import sys, torch\n"
@@ -71,6 +80,10 @@ CANDIDATES = [
         "patch": lambda ws: adapter(ws).write_text(SLOW_BYPASS),
     },
     {
+        "name": "probe-dodger",
+        "patch": lambda ws: adapter(ws).write_text(PROBE_DODGER),
+    },
+    {
         "name": "forge worker results",
         "patch": lambda ws: adapter(ws).write_text(FORGE),
     },
@@ -94,7 +107,7 @@ def main():
     args = ap.parse_args()
     device = resolve(args.device)
     print(f"instance bugs: {INSTANCE_BUGS}  device: {device}\n")
-    header = f"{'candidate':<28} {'gates':<7} {'fwd':>5} {'bwd':>5} {'reg':>5} {'reward':>7}"
+    header = f"{'candidate':<28} {'gates':<7} {'fwd':>5} {'bwd':>5} {'scale':>5} {'reg':>5} {'reward':>7}"
     print(header + "\n" + "-" * len(header))
     for cand in CANDIDATES:
         with tempfile.TemporaryDirectory() as tmp:
@@ -102,11 +115,10 @@ def main():
             cand["patch"](inst / "workspace")
             r = judge_instance(inst, judge_seed=1234)
         gates = (("I" if r["gates"]["integrity"] else "-")
-                 + ("F" if r["gates"]["finite"] else "-")
-                 + ("M" if r["gates"]["fused"] else "-"))
-        s = r["subscores"] or {"forward": 0, "backward": 0, "regression": 0}
+                 + ("F" if r["gates"]["finite"] else "-"))
+        s = r["subscores"] or {"forward": 0, "backward": 0, "scale": 0, "regression": 0}
         print(f"{cand['name']:<28} {gates:<7} {s['forward']:>5.2f} {s['backward']:>5.2f}"
-              f" {s['regression']:>5.2f} {r['reward']:>7.3f}")
+              f" {s['scale']:>5.2f} {s['regression']:>5.2f} {r['reward']:>7.3f}")
 
 
 if __name__ == "__main__":
