@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# PyTorch / data
+*.pt
+*.pth
+*.onnx
+*.ckpt
+checkpoints/
+wandb/
+runs/
+
+# Generated
+instance/
+dist/
+build/
+
+# Env / OS / IDE
+.env
+.DS_Store
+._*
+.idea/
+.vscode/
