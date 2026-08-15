@@ -24,7 +24,7 @@ RUNNER = Path(__file__).resolve().parent / "runner.py"
 COMPARE = Path(__file__).resolve().parent / "compare.py"
 MEMCHECK = Path(__file__).resolve().parent / "memcheck.py"
 WEIGHTS = {"forward": 0.5, "backward": 0.3, "regression": 0.2}
-FWD_GROUPS = {"forward_fp32", "forward_bf16", "forward_meta"}
+FWD_GROUPS = {"forward_fp32", "forward_bf16", "forward_meta", "forward_scale"}
 BWD_GROUPS = {"backward_fp32"}
 
 
