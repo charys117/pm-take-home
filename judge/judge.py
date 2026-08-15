@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cases import build_items, generate_cases
+from device import resolve
 from env.make_instance import make_instance
 
 ALLOWLIST = {"gqa_attn/adapter.py"}
@@ -36,7 +37,8 @@ def _frac(rows, pred):
     return sum(r["ok"] for r in rows) / len(rows) if rows else 0.0
 
 
-def judge_instance(instance_dir, judge_seed=None):
+def judge_instance(instance_dir, judge_seed=None, device=None):
+    resolve(device)
     instance = Path(instance_dir)
     seed = random.randrange(2**31) if judge_seed is None else judge_seed
     meta = json.loads((instance / "meta.json").read_text())
@@ -103,5 +105,6 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--instance", default="instance")
     ap.add_argument("--seed", type=int)
+    ap.add_argument("--device", choices=("cuda", "cpu"))
     args = ap.parse_args()
-    print(json.dumps(judge_instance(args.instance, args.seed), indent=2))
+    print(json.dumps(judge_instance(args.instance, args.seed, args.device), indent=2))

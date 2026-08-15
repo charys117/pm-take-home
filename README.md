@@ -19,7 +19,7 @@ The judge tests behavior against this, nothing else:
 
 ## How to run
 
-Requires Python 3.13+ and a CUDA GPU.
+Requires Python 3.13+. GPU optional (`--device cpu`).
 
 ```bash
 uv venv
@@ -49,6 +49,9 @@ make_instance.py
   --out     output directory (default: instance)
   --bugs    comma-separated bug names (e.g. gqa_mapping,causal_offset, default: random sample)
   --seed    seed for sampling bugs
+
+calibrate.py / judge.py
+  --device    cuda or cpu (default: cuda if available)
 
 judge.py
   --instance  instance directory to score (default: instance)

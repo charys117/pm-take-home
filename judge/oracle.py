@@ -14,8 +14,8 @@ def gqa_attn_oracle(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: b
 
     allowed = None
     if causal:
-        i = torch.arange(s_q).unsqueeze(1)
-        j = torch.arange(s_kv).unsqueeze(0)
+        i = torch.arange(s_q, device=q.device).unsqueeze(1)
+        j = torch.arange(s_kv, device=q.device).unsqueeze(0)
         allowed = j <= i + (s_kv - s_q)    # bottom-right alignment
 
     outs = []

@@ -7,7 +7,9 @@ from pathlib import Path
 
 import torch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from device import resolve
 from oracle import gqa_attn_oracle
 
 TOL = {
@@ -29,8 +31,11 @@ def check(item, rec, case, base_out):
         return "no result produced"        # worker died, or never wrote this case
     if "error" in rec:
         return str(rec["error"])[:200]
+    device = resolve()
     out = rec.get("out")
-    q, k, v = item["q"], item["k"], item["v"]
+    if isinstance(out, torch.Tensor):
+        out = out.to(device)
+    q, k, v = item["q"].to(device), item["k"].to(device), item["v"].to(device)
     if not isinstance(out, torch.Tensor) or out.shape != q.shape or out.dtype != q.dtype:
         return "wrong output shape or dtype"
     if not torch.isfinite(out.float()).all():
@@ -50,20 +55,20 @@ def check(item, rec, case, base_out):
     if item["grads"]:
         qo, ko, vo = (t.clone().requires_grad_(True) for t in (q, k, v))
         pred = gqa_attn_oracle(qo, ko, vo, causal=item["causal"]).float()
-        probe_loss = (pred * item["probe"]).sum()
+        probe_loss = (pred * item["probe"].to(device)).sum()
         ref = torch.autograd.grad(probe_loss, (qo, ko, vo))
         got = rec.get("grads", [])
         if len(got) != 3:
             return "missing gradients"
         for g, want in zip(got, ref):
-            g = torch.zeros_like(want) if g is None else g
+            g = torch.zeros_like(want) if g is None else g.to(device)
             if not isinstance(g, torch.Tensor) or g.shape != want.shape:
                 return "bad gradient tensor"
             err = _close(g, want, dtype)
             if err:
                 return err
     else:
-        after = rec.get("inputs_after") or []
+        after = [t.to(device) for t in (rec.get("inputs_after") or [])]
         if len(after) == 3 and any(not torch.equal(a, b) for a, b in zip(after, (q, k, v))):
             return "input mutated"
     return None
@@ -83,7 +88,7 @@ def main(inputs_path, outputs_path, cases_path):
         case = cases[item["case"]]
         err = check(item, rec, case, base_out)
         if item["role"] == "base" and err is None:
-            base_out[item["case"]] = rec["out"]
+            base_out[item["case"]] = rec["out"].to(resolve())
         row = {"group": case["group"], "ok": err is None, "nonfinite": err == "nonfinite"}
         if err:
             row["err"] = err

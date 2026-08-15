@@ -2,6 +2,7 @@
 """
 
 
+import os
 import sys
 from pathlib import Path
 
@@ -11,6 +12,10 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from gqa_attn import GQAAttention, gqa_attn_fused, gqa_attn_ref
+
+DEVICE = os.environ.get("DEVICE", "cpu")
+if DEVICE == "cuda" and not torch.cuda.is_available():
+    DEVICE = "cpu"
 
 # (Hq, Hkv, S_q, S_kv, causal)
 CONFIGS = [
@@ -24,9 +29,9 @@ CONFIGS = [
 
 def _qkv(h_q, h_kv, s_q, s_kv, seed=0):
     g = torch.Generator().manual_seed(seed)
-    q = torch.randn(2, s_q, h_q, 8, generator=g)
-    k = torch.randn(2, s_kv, h_kv, 8, generator=g)
-    v = torch.randn(2, s_kv, h_kv, 8, generator=g)
+    q = torch.randn(2, s_q, h_q, 8, generator=g).to(DEVICE)
+    k = torch.randn(2, s_kv, h_kv, 8, generator=g).to(DEVICE)
+    v = torch.randn(2, s_kv, h_kv, 8, generator=g).to(DEVICE)
     return q, k, v
 
 
@@ -47,6 +52,6 @@ def test_output_shape_and_dtype(h_q, h_kv, s_q, s_kv, causal):
 
 def test_module_smoke():
     torch.manual_seed(0)
-    m = GQAAttention(d_model=32, n_q_heads=4, n_kv_heads=2, head_dim=8)
-    out = m(torch.randn(2, 16, 32))
+    m = GQAAttention(d_model=32, n_q_heads=4, n_kv_heads=2, head_dim=8).to(DEVICE)
+    out = m(torch.randn(2, 16, 32, device=DEVICE))
     assert out.shape == (2, 16, 32) and torch.isfinite(out).all()

@@ -1,7 +1,13 @@
 """Hidden cases
 """
 
+import sys
+from pathlib import Path
+
 import torch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from device import resolve
 
 # (Hq, Hkv, S_q, S_kv, causal)
 FORWARD_GRID = [
@@ -52,7 +58,7 @@ def _tensors(case):
     dt = getattr(torch, case["dtype"])
 
     def t(s, h):
-        return (torch.randn(case["b"], s, h, case["d"], generator=g) * case["scale"]).to(dt)
+        return (torch.randn(case["b"], s, h, case["d"], generator=g) * case["scale"]).to(dt).to(resolve())
 
     return t(case["s_q"], case["h_q"]), t(case["s_kv"], case["h_kv"]), t(case["s_kv"], case["h_kv"])
 
@@ -66,7 +72,7 @@ def build_items(cases):
         if case["grads"]:
             # Random probe loss
             g = torch.Generator().manual_seed(case["seed"] + 1)
-            probe = torch.randn(case["b"], case["s_q"], case["h_q"], case["d"], generator=g)
+            probe = torch.randn(case["b"], case["s_q"], case["h_q"], case["d"], generator=g).to(resolve())
         items.append({"case": i, "role": "base", "q": q, "k": k, "v": v,
                       "causal": case["causal"], "grads": case["grads"], "probe": probe})
         if case["meta"]:

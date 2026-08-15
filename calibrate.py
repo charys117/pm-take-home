@@ -5,12 +5,14 @@ adversarial controls must land in the intended score order BEFORE any RL run
 trusts the reward. Run: python calibrate.py
 """
 
+import argparse
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from device import resolve
 from env.bugs import apply_bugs
 from env.make_instance import TEMPLATE, make_instance
 from judge.judge import judge_instance
@@ -87,7 +89,11 @@ CANDIDATES = [
 
 
 def main():
-    print(f"instance bugs: {INSTANCE_BUGS}\n")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--device", choices=("cuda", "cpu"))
+    args = ap.parse_args()
+    device = resolve(args.device)
+    print(f"instance bugs: {INSTANCE_BUGS}  device: {device}\n")
     header = f"{'candidate':<28} {'gates':<7} {'fwd':>5} {'bwd':>5} {'reg':>5} {'reward':>7}"
     print(header + "\n" + "-" * len(header))
     for cand in CANDIDATES:
