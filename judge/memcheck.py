@@ -23,25 +23,36 @@ def _smi_mib():
 
 
 def _measure_peak(worker_args):
-    proc = subprocess.Popen(
-        [sys.executable, "-u", __file__, "--worker", *worker_args],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-    proc.stdout.readline()
+    cmd = [sys.executable, "-u", __file__, "--worker", *worker_args]
+    kw = {}
+    if worker_args[0] == "candidate":
+        cmd.insert(1, "-P")
+        kw["cwd"] = worker_args[1]
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, **kw)
+    if not proc.stdout.readline():
+        proc.wait()
+        return None
     base = _smi_mib()
-    proc.stdin.write("\n")
-    proc.stdin.flush()
+    try:
+        proc.stdin.write("\n")
+        proc.stdin.flush()
+    except BrokenPipeError:
+        proc.wait()
+        return None
     peak = base
     while proc.poll() is None:
         peak = max(peak, _smi_mib())
+    if proc.returncode != 0:
+        return None
     return max(0, peak - base) * 1024 * 1024
 
 
 def worker(kind, workspace=None):
-    from oracle import gqa_attn_fused_oracle
     if kind == "candidate":
         sys.path.insert(0, workspace)
         from gqa_attn.adapter import gqa_attn_fused as fn
     else:
+        from oracle import gqa_attn_fused_oracle
         fn = gqa_attn_fused_oracle
     b, s, h_q, h_kv, d = SHAPE
     q = torch.randn(b, s, h_q, d, device="cuda", dtype=torch.bfloat16)
@@ -59,6 +70,9 @@ def main(workspace):
         fused = _measure_peak(["fused"])
         cand = _measure_peak(["candidate", workspace])
     except (FileNotFoundError, subprocess.CalledProcessError, ValueError):
+        print(json.dumps({"ok": False}))
+        return
+    if fused is None or cand is None:
         print(json.dumps({"ok": False}))
         return
     print(json.dumps({
