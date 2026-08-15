@@ -14,6 +14,8 @@ Public contract (the judge tests behavior against this, nothing else):
   match the reference semantics.
 - gqa_attn_fused must satisfy this contract for every supported configuration;
   gqa_attn_ref documents the intended semantics and stays the slow path.
+- On CUDA, peak memory on a fixed large config must match fused attention,
+  not vanilla matmul attention.
 """
 
 from torch import nn

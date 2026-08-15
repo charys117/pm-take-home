@@ -101,7 +101,9 @@ def main():
             inst = make_instance(Path(tmp) / "i", INSTANCE_BUGS, seed=7)
             cand["patch"](inst / "workspace")
             r = judge_instance(inst, judge_seed=1234)
-        gates = ("I" if r["gates"]["integrity"] else "-") + ("F" if r["gates"]["finite"] else "-")
+        gates = (("I" if r["gates"]["integrity"] else "-")
+                 + ("F" if r["gates"]["finite"] else "-")
+                 + ("M" if r["gates"]["fused"] else "-"))
         s = r["subscores"] or {"forward": 0, "backward": 0, "regression": 0}
         print(f"{cand['name']:<28} {gates:<7} {s['forward']:>5.2f} {s['backward']:>5.2f}"
               f" {s['regression']:>5.2f} {r['reward']:>7.3f}")

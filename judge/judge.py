@@ -22,6 +22,7 @@ from env.make_instance import make_instance
 ALLOWLIST = {"gqa_attn/adapter.py"}
 RUNNER = Path(__file__).resolve().parent / "runner.py"
 COMPARE = Path(__file__).resolve().parent / "compare.py"
+MEMCHECK = Path(__file__).resolve().parent / "memcheck.py"
 WEIGHTS = {"forward": 0.5, "backward": 0.3, "regression": 0.2}
 FWD_GROUPS = {"forward_fp32", "forward_bf16", "forward_meta"}
 BWD_GROUPS = {"backward_fp32"}
@@ -42,7 +43,7 @@ def judge_instance(instance_dir, judge_seed=None, device=None):
     instance = Path(instance_dir)
     seed = random.randrange(2**31) if judge_seed is None else judge_seed
     meta = json.loads((instance / "meta.json").read_text())
-    result = {"gates": {"integrity": True, "finite": True}, "subscores": {}, "reward": 0.0}
+    result = {"gates": {"integrity": True, "finite": True, "fused": True}, "subscores": {}, "reward": 0.0}
 
     def failed(gate):
         result["gates"][gate] = False
@@ -83,6 +84,17 @@ def judge_instance(instance_dir, judge_seed=None, device=None):
         if any(r["nonfinite"] for r in rows):
             result["gates"]["finite"] = False
             
+        # fused-memory gate (CUDA only): vanilla S*S scores blow the peak
+        if resolve().type == "cuda":
+            try:
+                mem = subprocess.run(
+                    [sys.executable, str(MEMCHECK), str(clean)],
+                    capture_output=True, text=True, timeout=60)
+                if not json.loads(mem.stdout)["ok"]:
+                    result["gates"]["fused"] = False
+            except (json.JSONDecodeError, KeyError, subprocess.TimeoutExpired):
+                result["gates"]["fused"] = False
+
         # public suite
         pt = subprocess.run(
             [sys.executable, "-m", "pytest", "tests", "-q", "--tb=no",

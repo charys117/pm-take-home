@@ -1,9 +1,10 @@
-"""Another vanilla implementation of GQA attention.
+"""Another vanilla implementation of GQA attention and a fused implementation.
 Use einsum instead of repeat_interleave + matmul.
 Force fp32 for numerical stability.
 """
 
 import torch
+import torch.nn.functional as F
 
 
 def gqa_attn_oracle(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool) -> torch.Tensor:
@@ -27,3 +28,19 @@ def gqa_attn_oracle(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: b
         w = torch.softmax(scores, dim=-1)
         outs.append(torch.einsum("bqgk,bkd->bqgd", w, v32[:, :, h]))
     return torch.cat(outs, dim=2).to(q.dtype)
+
+
+def gqa_attn_fused_oracle(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, causal: bool) -> torch.Tensor:
+    s_q, s_kv = q.shape[1], k.shape[1]
+    group = q.shape[2] // k.shape[2]
+    k = k.repeat_interleave(group, dim=2)
+    v = v.repeat_interleave(group, dim=2)
+    q, k, v = (t.transpose(1, 2) for t in (q, k, v))
+    if causal:
+        i = torch.arange(s_q, device=q.device).unsqueeze(1)
+        j = torch.arange(s_kv, device=q.device).unsqueeze(0)
+        mask = j <= i + (s_kv - s_q)
+        out = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+    else:
+        out = F.scaled_dot_product_attention(q, k, v)
+    return out.transpose(1, 2)

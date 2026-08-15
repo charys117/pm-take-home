@@ -26,7 +26,7 @@ BACKWARD_GRID = [
     (8, 2, 12, 12, False),
 ]
 
-# Causal, S_kv > S_q >= 2: perturb the last kv position, rows :-1 must not move.
+# causal, S_kv > S_q >= 2: perturb the last kv position, rows :-1 must not move.
 METAMORPHIC_GRID = [
     (4, 2, 8, 24, True),
     (4, 4, 6, 16, True),
@@ -48,7 +48,7 @@ def generate_cases(rng):
     add("forward_fp32", FORWARD_GRID, "float32")
     add("forward_bf16", FORWARD_GRID[:4], "bfloat16")
     add("forward_meta", METAMORPHIC_GRID, "float32", meta=True)
-    # Gradients compared in fp32 only
+    # gradients compared in fp32 only
     add("backward_fp32", BACKWARD_GRID, "float32", grads=True)
     return cases
 
@@ -70,7 +70,7 @@ def build_items(cases):
         q, k, v = _tensors(case)
         probe = None
         if case["grads"]:
-            # Random probe loss
+            # random probe loss
             g = torch.Generator().manual_seed(case["seed"] + 1)
             probe = torch.randn(case["b"], case["s_q"], case["h_q"], case["d"], generator=g).to(resolve())
         items.append({"case": i, "role": "base", "q": q, "k": k, "v": v,
